@@ -1,1 +1,0 @@
-# Container Number Recognition AI package

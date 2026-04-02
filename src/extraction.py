@@ -17,12 +17,10 @@ class ContainerResult:
     container_color: List[int] = field(default_factory=lambda: [0, 0, 0])
     error: Optional[str] = None
 
-# Common OCR character confusions that affect carrier prefix matching.
-# Each tuple is (correct_char, [list of characters OCR might confuse it with]).
-# For each known prefix we generate variants by replacing each character with
-# every commonly-confused alternative.
+
+# OCR character confusions for fuzzy prefix matching (e.g. O↔D, I↔1).
 _OCR_CHAR_CONFUSIONS = [
-    ("O", ["D", "0"]),   # O <-> D (primary issue in 1.png) and O <-> 0
+    ("O", ["D", "0"]),
     ("D", ["O"]),
     ("0", ["O"]),
     ("I", ["1"]),
@@ -39,16 +37,12 @@ _OCR_CHAR_CONFUSIONS = [
     ("7", ["T"]),
 ]
 
-# Reverse index: for a given character, what alternatives might OCR show?
-# e.g. _CHAR_ALTERNATIVES['O'] = {'D', '0'}
 _CHAR_ALTERNATIVES: dict = {}
 for _correct, _confused_list in _OCR_CHAR_CONFUSIONS:
     for _alt in _confused_list:
         _CHAR_ALTERNATIVES.setdefault(_correct, set()).add(_alt)
         _CHAR_ALTERNATIVES.setdefault(_alt, set()).add(_correct)
 
-# Build a lookup: OCR-seen prefix → canonical prefix(s) from the known set.
-# This is computed once at import time.
 _PREFIX_FUZZY_MAP: dict = {}
 for _prefix in CARRIER_PREFIXES:
     for _pos in range(len(_prefix)):
@@ -62,13 +56,7 @@ for _prefix in CARRIER_PREFIXES:
 
 
 def _fuzzy_prefix_match(text: str) -> Optional[str]:
-    """
-    Try to match the first 4 characters of *text* against carrier prefixes,
-    allowing for common OCR character confusions.
-
-    Returns the canonical prefix string (e.g. ``"OOLU"``) if a match is
-    found, otherwise ``None``.
-    """
+    """Match first 4 chars against carrier prefixes, allowing OCR confusions."""
     candidate = text[:4]
     if candidate in CARRIER_PREFIX_SET:
         return candidate
@@ -95,19 +83,12 @@ def _get_line_y_range(line) -> Tuple[float, float]:
         if len(vals) == 4:
             y_vals.extend([vals[1], vals[1] + vals[3]])
         else:
-            # 8-point polygon: y-coordinates are at odd indices
             y_vals.extend(vals[1::2])
     return min(y_vals), max(y_vals)
 
 
 def _merge_overlapping_lines(lines) -> list:
-    """
-    Merge OCR lines that share vertical overlap.
-
-    Azure's Read API sometimes splits a single visual line into multiple
-    groups. This groups lines whose y-ranges overlap and concatenates their
-    words so downstream regex matching can see the full line.
-    """
+    """Merge OCR lines that share vertical overlap."""
     if not lines:
         return []
 
@@ -132,21 +113,12 @@ def _merge_overlapping_lines(lines) -> list:
 
 
 def _parse_word_bbox(word) -> Tuple[int, int, int, int]:
-    """
-    Parse word bounding box.
-
-    Args:
-        word: OCR word object
-
-    Returns:
-        (x1, y1, x2, y2)
-    """
+    """Parse word bounding box into (x1, y1, x2, y2)."""
     bbox_str = word.bounding_box
     vals = [float(v) for v in bbox_str.split(",")] if isinstance(bbox_str, str) else list(bbox_str)
     if len(vals) == 4:
         x1, y1, w, h = vals
         return int(x1), int(y1), int(x1 + w), int(y1 + h)
-    # 8-point polygon
     return int(vals[0]), int(vals[1]), int(vals[4]), int(vals[5])
 
 
@@ -165,17 +137,7 @@ def _within_buffer(co1: int, co2: int, buffer: int = SPATIAL_BUFFER) -> bool:
 
 
 def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool:
-    """
-    Try regex-based extraction on a flat list of words.
-
-    Builds a concatenated text from words, then applies the carrier-prefix
-    regex and the container-type regex.  Uses fuzzy prefix matching as a
-    fallback when exact regex matching fails (handles common OCR misreads
-    like O/D).
-
-    Returns True if both container number and type were found.
-    """
-    # Carrier-prefix regex (exact match)
+    """Try regex-based extraction on a flat list of words. Returns True if both fields found."""
     prefix_pattern = "|".join(CARRIER_PREFIXES)
     regex_pattern = f"({prefix_pattern})(\\d{{7}})"
 
@@ -187,7 +149,7 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
         line_text += wt
         word_spans.append((start, len(line_text)))
 
-    # --- Container number (exact regex) ---
+    # Exact regex match
     if not result.container_number:
         for m in re.finditer(regex_pattern, line_text):
             candidate = m.group(0)
@@ -211,20 +173,16 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
             result.bounding_box = bb
             break
 
-    # --- Container number (fuzzy prefix fallback) ---
+    # Fuzzy prefix fallback
     if not result.container_number:
         for idx, w in enumerate(words):
             wt = str(w.text).strip().replace(" ", "").upper()
             matched_prefix = _fuzzy_prefix_match(wt)
             if matched_prefix is None:
                 continue
-            # Collect digits from subsequent adjacent words
             serial_digits = ""
-            bb: List[int] = [0, 0, 0, 0]
-            bb_set = False
             wx1, wy1, wx2, wy2 = _parse_word_bbox(w)
             bb = [wx1, wy1, wx2, wy2]
-            bb_set = True
             for w2 in words[idx + 1:]:
                 w2t = str(w2.text).strip().replace(" ", "").upper()
                 digits_only = "".join(ch for ch in w2t if ch.isdigit())
@@ -243,7 +201,7 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
                     result.bounding_box = bb
                     break
 
-    # --- Container type ---
+    # Container type
     if not result.container_type:
         mt = re.search(type_regex, line_text)
         if mt:
@@ -253,12 +211,7 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
 
 
 def extract_container_regex(ocr_result) -> ContainerResult:
-    """
-    Regex-based container extraction with ISO 6346 check-digit validation.
-
-    Merges vertically-overlapping OCR lines before matching, then falls back
-    to fuzzy prefix matching for common OCR misreads (e.g. O/D).
-    """
+    """Regex-based extraction with ISO 6346 check-digit validation and fuzzy prefix fallback."""
     result = ContainerResult()
 
     type_pattern = "|".join(CONTAINER_TYPE_PREFIXES)
@@ -268,8 +221,6 @@ def extract_container_regex(ocr_result) -> ContainerResult:
         if not region.lines:
             continue
 
-        # Merge vertically-overlapping lines so prefix + serial are visible
-        # to the regex even when the OCR groups them separately.
         merged_lines = _merge_overlapping_lines(region.lines)
 
         for line in merged_lines:
@@ -287,12 +238,7 @@ def extract_container_regex(ocr_result) -> ContainerResult:
 
 
 def extract_container_location(ocr_result) -> ContainerResult:
-    """
-    Location-based container extraction using spatial adjacency of OCR words.
-
-    Uses orientation-aware reference coordinates: [x2, y1] for horizontal
-    text, [x1, y2] for vertical text.
-    """
+    """Location-based extraction using spatial adjacency of OCR words."""
     result = ContainerResult()
     bound_block = [0, 0, 0, 0]
     orientation_horizontal = True
@@ -313,8 +259,6 @@ def extract_container_location(ocr_result) -> ContainerResult:
                 x1, y1, x2, y2 = _parse_word_bbox(word)
                 bbox8 = [x1, y1, x2, y1, x2, y2, x1, y2]
 
-                # Container prefix – O(1) lookup via frozenset, with fuzzy
-                # fallback for common OCR misreads (e.g. DOLU → OOLU).
                 if not result.container_number:
                     matched_prefix = _fuzzy_prefix_match(clean_text)
                     if matched_prefix:
@@ -324,7 +268,6 @@ def extract_container_location(ocr_result) -> ContainerResult:
                         allowable_buffer = _get_label_angle(bbox8) * 3 or SPATIAL_BUFFER
                         bound_block = [x1, y1, x2, y2]
 
-                # Container serial
                 elif CONTAINER_NUMBER_LENGTH > len(result.container_number) >= 4:
                     if orientation_horizontal:
                         crit_met = (x1 >= last_xy[0] and
@@ -339,7 +282,6 @@ def extract_container_location(ocr_result) -> ContainerResult:
                         bound_block[2] = max(bound_block[2], x2)
                         bound_block[3] = max(bound_block[3], y2)
 
-                # Container type
                 if not result.container_type and re.search(type_regex, clean_text):
                     result.container_type = clean_text
 
