@@ -1,11 +1,15 @@
 """Command-line interface for container detection."""
 
+import logging
 import os
+
 import cv2
 from .config import DATA_DIR
 from .ocr_client import OCRClient
 from .extraction import ContainerResult, run_extraction_pipeline
 from .preprocessing import downscale_image
+
+log = logging.getLogger(__name__)
 
 
 def process_image(image_path: str, ocr_client: OCRClient) -> ContainerResult:
@@ -25,14 +29,21 @@ def process_image(image_path: str, ocr_client: OCRClient) -> ContainerResult:
 
         return run_extraction_pipeline(ocr_result, img_bytes)
 
-    except Exception as e:
+    except ValueError as e:
+        log.error("Validation error processing %s: %s", image_path, e)
         return ContainerResult(error=str(e))
+    except TimeoutError as e:
+        log.error("OCR timeout processing %s: %s", image_path, e)
+        return ContainerResult(error=str(e))
+    except Exception as e:
+        log.exception("Unexpected error processing %s", image_path)
+        return ContainerResult(error=f"{type(e).__name__}: {e}")
 
 
 def main():
     """Main CLI function."""
     if not os.path.exists(DATA_DIR):
-        print(f"Data directory {DATA_DIR} not found")
+        log.error("Data directory '%s' not found", DATA_DIR)
         return
 
     ocr_client = OCRClient()
@@ -40,12 +51,11 @@ def main():
     for filename in os.listdir(DATA_DIR):
         filepath = os.path.join(DATA_DIR, filename)
         if os.path.isfile(filepath) and filename.lower().endswith(('.bmp', '.jpg', '.jpeg', '.png')):
-            print(f"Processing {filename}...")
             result = process_image(filepath, ocr_client)
-            print(f"Result: {result}")
+            log.info("Result for %s: %s", filename, result)
 
             if result.error or not result.container_number:
-                print(f"Skipped: {result.error or 'No container detected'}")
+                log.warning("Skipped %s: %s", filename, result.error or "No container detected")
 
 
 if __name__ == "__main__":
