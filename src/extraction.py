@@ -1,10 +1,21 @@
 """Container number extraction logic."""
 
 import re
-from typing import List, Tuple, Optional, FrozenSet
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional
 from .config import CARRIER_PREFIXES, CARRIER_PREFIX_SET, CONTAINER_TYPE_PREFIXES, SPATIAL_BUFFER, CONTAINER_NUMBER_LENGTH
-from .models import ContainerResult
+from .preprocessing import get_container_color_from_bytes
 from .validation import validate_iso6346_check_digit
+
+
+@dataclass
+class ContainerResult:
+    """Result of container detection."""
+    container_number: str = ""
+    container_type: str = ""
+    bounding_box: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    container_color: List[int] = field(default_factory=lambda: [0, 0, 0])
+    error: Optional[str] = None
 
 # Common OCR character confusions that affect carrier prefix matching.
 # Each tuple is (correct_char, [list of characters OCR might confuse it with]).
@@ -67,12 +78,25 @@ def _fuzzy_prefix_match(text: str) -> Optional[str]:
     return None
 
 
+class _MergedLine:
+    """Synthetic line produced by merging vertically-overlapping OCR lines."""
+    __slots__ = ("words", "bounding_box")
+
+    def __init__(self, words: list, bounding_box: str = "") -> None:
+        self.words = words
+        self.bounding_box = bounding_box
+
+
 def _get_line_y_range(line) -> Tuple[float, float]:
     """Return the (min_y, max_y) vertical extent of a line's words."""
     y_vals: List[float] = []
     for w in line.words:
         vals = [float(v) for v in w.bounding_box.split(",")] if isinstance(w.bounding_box, str) else list(w.bounding_box)
-        y_vals.extend([vals[1], vals[1] + vals[3]])
+        if len(vals) == 4:
+            y_vals.extend([vals[1], vals[1] + vals[3]])
+        else:
+            # 8-point polygon: y-coordinates are at odd indices
+            y_vals.extend(vals[1::2])
     return min(y_vals), max(y_vals)
 
 
@@ -80,10 +104,9 @@ def _merge_overlapping_lines(lines) -> list:
     """
     Merge OCR lines that share vertical overlap.
 
-    Azure's Read API sometimes splits a single visual line of text into
-    multiple line groups (e.g. when a word is offset vertically).
-    This function groups lines whose y-ranges overlap and concatenates
-    their words so downstream regex matching can see the full line.
+    Azure's Read API sometimes splits a single visual line into multiple
+    groups. This groups lines whose y-ranges overlap and concatenates their
+    words so downstream regex matching can see the full line.
     """
     if not lines:
         return []
@@ -95,18 +118,16 @@ def _merge_overlapping_lines(lines) -> list:
     for line in lines[1:]:
         y_min, y_max = _get_line_y_range(line)
         if y_min < current_y_max and y_max > current_y_min:
-            # Overlapping – merge words from this line
             current_words.extend(line.words)
             current_y_min = min(current_y_min, y_min)
             current_y_max = max(current_y_max, y_max)
         else:
-            # No overlap – flush current group
-            merged.append(type(lines[0])(current_words, ""))
+            merged.append(_MergedLine(current_words))
             current_words = list(line.words)
             current_y_min = y_min
             current_y_max = y_max
 
-    merged.append(type(lines[0])(current_words, ""))
+    merged.append(_MergedLine(current_words))
     return merged
 
 
@@ -130,22 +151,16 @@ def _parse_word_bbox(word) -> Tuple[int, int, int, int]:
 
 
 def _check_orientation_horizontal(bbox: List[int]) -> bool:
-    """Check if text is horizontal."""
-    width = bbox[2] - bbox[0]
-    height = bbox[5] - bbox[1]
-    return width > height
+    return (bbox[2] - bbox[0]) > (bbox[5] - bbox[1])
 
 
 def _get_label_angle(bbox: List[int]) -> int:
-    """Get buffer for adjacency checks."""
-    is_horizontal = _check_orientation_horizontal(bbox)
-    if is_horizontal:
+    if _check_orientation_horizontal(bbox):
         return (bbox[5] - bbox[1]) // 2
     return (bbox[2] - bbox[0]) // 2
 
 
 def _within_buffer(co1: int, co2: int, buffer: int = SPATIAL_BUFFER) -> bool:
-    """Check if co2 is within buffer of co1."""
     return co1 - buffer < co2 < co1 + buffer
 
 
@@ -216,7 +231,7 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
                 if not digits_only:
                     break
                 serial_digits += digits_only
-                w2x1, w2y1, w2x2, w2y2 = _parse_word_bbox(w2)
+                _, _, w2x2, w2y2 = _parse_word_bbox(w2)
                 bb[2] = max(bb[2], w2x2)
                 bb[3] = max(bb[3], w2y2)
                 if len(serial_digits) >= 7:
@@ -239,26 +254,10 @@ def _try_regex_on_words(words, result: ContainerResult, type_regex: str) -> bool
 
 def extract_container_regex(ocr_result) -> ContainerResult:
     """
-    Regex-based container extraction.
+    Regex-based container extraction with ISO 6346 check-digit validation.
 
-    Processes each OCR line independently to avoid cross-region false matches.
-    Uses ``re.finditer`` so every candidate on a line is tested against the
-    ISO 6346 check-digit rule before being accepted.  The regex enforces
-    exactly 11 characters (4-letter owner code + 7 digits) to match the
-    ISO 6346 standard.
-
-    Lines that share vertical overlap are merged before matching so that
-    container numbers split across OCR line groups (a common artefact) are
-    still detected.
-
-    A fuzzy-prefix fallback handles common OCR misreads (e.g. O/D) when
-    the exact regex match fails.
-
-    Args:
-        ocr_result: Azure OCR result
-
-    Returns:
-        ContainerResult
+    Merges vertically-overlapping OCR lines before matching, then falls back
+    to fuzzy prefix matching for common OCR misreads (e.g. O/D).
     """
     result = ContainerResult()
 
@@ -291,17 +290,8 @@ def extract_container_location(ocr_result) -> ContainerResult:
     """
     Location-based container extraction using spatial adjacency of OCR words.
 
-    Uses ``CARRIER_PREFIX_SET`` (frozenset) for O(1) prefix lookup.
-    The reference coordinate ``last_xy`` is set according to the detected
-    text orientation:
-      - Horizontal text → [x2, y1] (next word must start to the right)
-      - Vertical text   → [x1, y2] (next word must start below)
-
-    Args:
-        ocr_result: Azure OCR result
-
-    Returns:
-        ContainerResult
+    Uses orientation-aware reference coordinates: [x2, y1] for horizontal
+    text, [x1, y2] for vertical text.
     """
     result = ContainerResult()
     bound_block = [0, 0, 0, 0]
@@ -330,8 +320,6 @@ def extract_container_location(ocr_result) -> ContainerResult:
                     if matched_prefix:
                         result.container_number = matched_prefix
                         orientation_horizontal = _check_orientation_horizontal(bbox8)
-                        # Reference coordinate depends on orientation so that the
-                        # adjacency test for the next word is directionally correct.
                         last_xy = [x2, y1] if orientation_horizontal else [x1, y2]
                         allowable_buffer = _get_label_angle(bbox8) * 3 or SPATIAL_BUFFER
                         bound_block = [x1, y1, x2, y2]
@@ -358,4 +346,22 @@ def extract_container_location(ocr_result) -> ContainerResult:
                 allowable_buffer = _get_label_angle(bbox8) * 3 or allowable_buffer
 
     result.bounding_box = bound_block
+    return result
+
+
+def run_extraction_pipeline(ocr_result, image_bytes: bytes) -> ContainerResult:
+    """Run the full pipeline: regex extraction → location fallback → color detection."""
+    result = extract_container_regex(ocr_result)
+
+    if not result.container_number or not result.container_type:
+        loc = extract_container_location(ocr_result)
+        if not result.container_number:
+            result.container_number = loc.container_number
+            result.bounding_box = loc.bounding_box
+        if not result.container_type:
+            result.container_type = loc.container_type
+
+    if result.bounding_box != [0, 0, 0, 0]:
+        result.container_color = get_container_color_from_bytes(image_bytes, result.bounding_box)
+
     return result

@@ -1,8 +1,5 @@
 """Validation functions for container numbers."""
 
-from .config import ISO6346_CHECK_DIGIT_MULTIPLIERS
-
-# ISO 6346 check-digit validation
 _ISO6346_LETTER_VALUES = {
     'A': 10, 'B': 12, 'C': 13, 'D': 14, 'E': 15, 'F': 16, 'G': 17, 'H': 18,
     'I': 19, 'J': 20, 'K': 21, 'L': 23, 'M': 24, 'N': 25, 'O': 26, 'P': 27,
@@ -14,12 +11,7 @@ _ISO6346_LETTER_VALUES = {
 def validate_iso6346_check_digit(container_number: str) -> bool:
     """
     Validate the ISO 6346 check digit for a container number.
-
-    Args:
-        container_number: 11-character string, e.g. "MSCU1234567"
-
-    Returns:
-        True if the check digit matches, False otherwise
+    Letters map to values 10-38, skipping multiples of 11 (11, 22, 33).
     """
     if len(container_number) != 11:
         return False
@@ -34,7 +26,7 @@ def validate_iso6346_check_digit(container_number: str) -> bool:
             val = int(ch)
         else:
             return False
-        total += val * ISO6346_CHECK_DIGIT_MULTIPLIERS[i]
+        total += val * 2 ** i
 
     remainder = total % 11
     expected_check = 0 if remainder == 10 else remainder

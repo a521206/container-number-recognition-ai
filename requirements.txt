@@ -1,8 +1,9 @@
 python-dotenv
 azure-cognitiveservices-vision-computervision
+msrest
 opencv-python
 numpy
 fastapi
+python-multipart
 uvicorn
 pytest
-msrest

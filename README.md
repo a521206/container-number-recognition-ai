@@ -1,47 +1,27 @@
-# AI in Logistics: Container Number Recognition
+# Container Number Recognition AI
 
-[[`Project Writeup`](https://medium.com/@jonathanlawhh) [`My Website`](https://jonathanlawhh.com/)]
+OCR-based container number detection using Azure Computer Vision API.
 
-## Project Overview
-![AI in Logistics: Container Number Recognition header image](/assets/AI%20in%20Logistics%20Container%20Number%20Recognition%20Header.jpg)
-Traditional container tracking often relies on manual scans and tedious paperwork, creating inefficiencies and bottlenecks.
-This project leverages Optical Character Recognition (OCR) technology to automatically read container numbers directly from images, offering innovation in logistics management.
+## Setup
 
-Companies using this AI solution can now enjoy real-time visibility into container movement within their premises.
-
-## References
-- [Azure AI Vision](https://azure.microsoft.com/en-us/products/ai-services/ai-vision) by Microsoft Azure
-- [OpenCV](https://opencv.org/)
-
-## Setup and Usage
-
-### Software Requirements
-- Python >= 3.10
-- [Microsoft Azure Vision API](https://azure.microsoft.com/en-us/products/ai-services/ai-vision) API keys
-
-### Installation
-
-1. Clone this repository:
 ```bash
-git clone https://github.com/jonathanlawhh/container-number-recognition-ai.git
-```
-2. Install required libraries:
-```bash
-pip install -R requirements.txt
+pip install -r requirements.txt
 ```
 
-### Usage
+Rename `.env-sample` to `.env` and fill in `VISION_ENDPOINT` and `VISION_KEY`.
 
-1. Place your container images in the .\data\ folder.
-2. Rename `.env-sample` to `.env`
-3. Fill up both values in .env `VISION_ENDPOINT` and `VISION_KEY` from your Microsoft Azure Vision API project.
-4. Run the script.
+## Usage
+
 ```bash
+# CLI mode – process images in ./data/
 python main.py
+
+# API mode – start FastAPI server on port 8000
+python main.py api
 ```
 
-## Closing thoughts
+## API
 
-- Using a ready built service such as Azure Vision AI offloads most of the image processing task
-- Azure Vision API is more reliable than building using Tesseract OCR if the environment is dynamic, performance is more consistent compared to running on a local hardware
-- Can be integrated with in-house Transport Management Systems
+`POST /detect` — upload an image, returns container number, type, bounding box, and color.
+
+`GET /health` — health check.
