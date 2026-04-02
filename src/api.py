@@ -33,11 +33,11 @@ async def detect_container(file: UploadFile = File(...)):
     ocr_result = ocr_client.recognize_printed_text(img_bytes)
     if not ocr_result.regions:
         log.info("No text detected in %s", file.filename)
-        return ContainerResult(error="No text detected").__dict__
+        return ContainerResult(error="No text detected").to_dict()
 
     result = run_extraction_pipeline(ocr_result, img_bytes)
     log.info("Detection result for %s: container=%s type=%s", file.filename, result.container_number or "none", result.container_type or "none")
-    return result.__dict__
+    return result.to_dict()
 
 
 @app.get("/health")

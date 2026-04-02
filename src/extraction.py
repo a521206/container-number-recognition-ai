@@ -19,6 +19,48 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
+class WeightValue:
+    """Weight in pounds and kilograms."""
+    pounds: Optional[int] = None
+    kilograms: Optional[int] = None
+
+    def to_dict(self) -> Optional[dict]:
+        if self.pounds is None and self.kilograms is None:
+            return None
+        return {"pounds": self.pounds, "kilograms": self.kilograms}
+
+
+@dataclass
+class OwnerOperator:
+    """Container owner/operator details."""
+    name: Optional[str] = None
+    location: Optional[str] = None
+
+    def to_dict(self) -> Optional[dict]:
+        if self.name is None and self.location is None:
+            return None
+        return {"name": self.name, "location": self.location}
+
+
+@dataclass
+class Weights:
+    """Container weight specifications."""
+    tare_weight: WeightValue = field(default_factory=WeightValue)
+    payload_weight: WeightValue = field(default_factory=WeightValue)
+    maximum_gross_weight: WeightValue = field(default_factory=WeightValue)
+
+    def to_dict(self) -> Optional[dict]:
+        d = {
+            "tare_weight": self.tare_weight.to_dict(),
+            "payload_weight": self.payload_weight.to_dict(),
+            "maximum_gross_weight": self.maximum_gross_weight.to_dict(),
+        }
+        if all(v is None for v in d.values()):
+            return None
+        return d
+
+
+@dataclass
 class ContainerResult:
     """Result of container detection."""
     container_number: str = ""
@@ -26,6 +68,54 @@ class ContainerResult:
     bounding_box: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
     container_color: List[int] = field(default_factory=lambda: [0, 0, 0])
     error: Optional[str] = None
+    status: Optional[str] = None
+    weights: Optional[Weights] = None
+    owner_code: Optional[str] = None
+    container_id: Optional[str] = None
+    serial_number: Optional[str] = None
+    owner_operator: Optional[OwnerOperator] = None
+    container_type_code: Optional[str] = None
+
+    def _derive_fields(self) -> None:
+        """Populate structured fields from container_number and container_type."""
+        if not self.container_number or len(self.container_number) != 11:
+            return
+        self.owner_code = self.container_number[:4]
+        self.serial_number = self.container_number[4:]
+        self.container_id = (
+            f"{self.owner_code} "
+            f"{self.serial_number[:6]} "
+            f"{self.serial_number[6]}"
+        )
+        if self.container_type:
+            self.container_type_code = self.container_type
+
+    def to_dict(self) -> dict:
+        """Return the result as a JSON-serialisable dict matching the target schema."""
+        self._derive_fields()
+        d: dict = {}
+        if self.error:
+            d["error"] = self.error
+            return d
+        if self.status is not None:
+            d["status"] = self.status
+        if self.weights is not None:
+            w = self.weights.to_dict()
+            if w is not None:
+                d["weights"] = w
+        if self.owner_code is not None:
+            d["owner_code"] = self.owner_code
+        if self.container_id is not None:
+            d["container_id"] = self.container_id
+        if self.serial_number is not None:
+            d["serial_number"] = self.serial_number
+        if self.owner_operator is not None:
+            oo = self.owner_operator.to_dict()
+            if oo is not None:
+                d["owner_operator"] = oo
+        if self.container_type_code is not None:
+            d["container_type_code"] = self.container_type_code
+        return d
 
 
 def _find_matching_carrier_prefix(text: str) -> Optional[str]:

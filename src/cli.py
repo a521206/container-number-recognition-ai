@@ -1,5 +1,6 @@
 """Command-line interface for container detection."""
 
+import json
 import logging
 import os
 
@@ -52,10 +53,11 @@ def main():
         filepath = os.path.join(DATA_DIR, filename)
         if os.path.isfile(filepath) and filename.lower().endswith(('.bmp', '.jpg', '.jpeg', '.png')):
             result = process_image(filepath, ocr_client)
-            log.info("Result for %s: %s", filename, result)
 
             if result.error or not result.container_number:
                 log.warning("Skipped %s: %s", filename, result.error or "No container detected")
+            else:
+                print(json.dumps(result.to_dict(), indent=2))
 
 
 if __name__ == "__main__":
