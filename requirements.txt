@@ -1,6 +1,8 @@
 python-dotenv
-azure-ai-vision
+azure-cognitiveservices-vision-computervision
 opencv-python
 numpy
-flask
-functions-framework==3.5.0
+fastapi
+uvicorn
+pytest
+msrest
