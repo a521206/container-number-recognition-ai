@@ -1,5 +1,6 @@
 python-dotenv
 azure-cognitiveservices-vision-computervision
+azure-ai-documentintelligence
 msrest
 opencv-python
 numpy

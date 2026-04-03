@@ -318,7 +318,7 @@ def extract_container_location(ocr_result) -> ContainerResult:
                         allowable_buffer = get_bounding_box_half_min_extent(bbox8) * 3 or SPATIAL_BUFFER
                         bound_block = [x1, y1, x2, y2]
 
-                elif CONTAINER_NUMBER_LENGTH > len(result.container_number) >= 4:
+                elif 4 <= len(result.container_number) < CONTAINER_NUMBER_LENGTH:
                     if orientation_horizontal:
                         crit_met = (x1 >= last_xy[0] and
                                     are_coordinates_within_distance(last_xy[1], y1, allowable_buffer))

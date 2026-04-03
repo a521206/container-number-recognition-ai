@@ -65,6 +65,32 @@ async def detect_container_llama_extract(file: UploadFile = File(...)):
     return result.to_dict()
 
 
+@app.post("/detect/doc-intelligence")
+async def detect_container_doc_intelligence(file: UploadFile = File(...)):
+    """Detect container number from uploaded image using Azure Document Intelligence."""
+    from .document_intelligence_client import DocumentIntelligenceClient
+
+    if not file.filename or not file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+        raise HTTPException(status_code=400, detail="Invalid file type. Accepted: .jpg, .jpeg, .png, .bmp")
+
+    contents = await file.read()
+
+    try:
+        client = DocumentIntelligenceClient()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    result = client.extract_from_bytes(contents, filename=file.filename)
+    log.info(
+        "Document Intelligence result for %s: container=%s type=%s status=%s",
+        file.filename,
+        result.container_number or "none",
+        result.container_type or "none",
+        result.status or "none",
+    )
+    return result.to_dict()
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
