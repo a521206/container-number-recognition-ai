@@ -7,3 +7,5 @@ fastapi
 python-multipart
 uvicorn
 pytest
+requests
+llama-cloud>=2.1

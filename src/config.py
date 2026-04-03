@@ -16,6 +16,14 @@ PREFIX_FILE = "./container_prefix.txt"
 VISION_ENDPOINT = os.getenv("VISION_ENDPOINT", "")
 VISION_KEY = os.getenv("VISION_KEY", "")
 
+# Azure Document Intelligence (Form Recognizer) for structured extraction
+DOCUMENT_INTELLIGENCE_ENDPOINT = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT", "")
+DOCUMENT_INTELLIGENCE_KEY = os.getenv("DOCUMENT_INTELLIGENCE_KEY", "")
+DOCUMENT_INTELLIGENCE_MODEL_ID = os.getenv("DOCUMENT_INTELLIGENCE_MODEL_ID", "containerModel")
+
+LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY", "")
+LLAMA_EXTRACT_CONFIG_ID = os.getenv("LLAMA_EXTRACT_CONFIG_ID", "")
+
 
 def _load_carrier_prefixes_from_file():
     """Load carrier prefixes from file."""
