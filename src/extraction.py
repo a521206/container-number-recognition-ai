@@ -12,7 +12,6 @@ from .geometry import (
     parse_word_bounding_box, is_bounding_box_horizontal,
     get_bounding_box_half_min_extent, are_coordinates_within_distance,
 )
-from .preprocessing import extract_dominant_color_from_image_bytes
 from .validation import validate_iso6346_check_digit
 
 log = logging.getLogger(__name__)
@@ -63,6 +62,7 @@ class Weights:
 @dataclass
 class ContainerResult:
     """Result of container detection."""
+    file_name: str = ""
     container_number: str = ""
     container_type: str = ""
     bounding_box: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
@@ -75,28 +75,38 @@ class ContainerResult:
     serial_number: Optional[str] = None
     owner_operator: Optional[OwnerOperator] = None
     container_type_code: Optional[str] = None
+    method_used: Optional[str] = None
+    valid: Optional[bool] = None
+    reason: Optional[str] = None
 
     def _derive_fields(self) -> None:
-        """Populate structured fields from container_number and container_type."""
+        """Populate structured fields from container_number and container_type (idempotent)."""
+        if self.owner_code is not None:
+            return
         if not self.container_number or len(self.container_number) != 11:
             return
         self.owner_code = self.container_number[:4]
         self.serial_number = self.container_number[4:]
-        self.container_id = (
-            f"{self.owner_code} "
-            f"{self.serial_number[:6]} "
-            f"{self.serial_number[6]}"
-        )
+        self.container_id = f"{self.owner_code} {self.serial_number[:6]} {self.serial_number[6]}"
         if self.container_type:
             self.container_type_code = self.container_type
 
     def to_dict(self) -> dict:
-        """Return the result as a JSON-serialisable dict matching the target schema."""
         self._derive_fields()
         d: dict = {}
+        if self.file_name:
+            d["file_name"] = self.file_name
         if self.error:
             d["error"] = self.error
             return d
+        if self.container_number:
+            d["container_number"] = self.container_number
+        if self.container_type:
+            d["container_type"] = self.container_type
+        if self.bounding_box and self.bounding_box != [0, 0, 0, 0]:
+            d["bounding_box"] = self.bounding_box
+        if self.container_color and self.container_color != [0, 0, 0]:
+            d["container_color"] = self.container_color
         if self.status is not None:
             d["status"] = self.status
         if self.weights is not None:
@@ -115,6 +125,12 @@ class ContainerResult:
                 d["owner_operator"] = oo
         if self.container_type_code is not None:
             d["container_type_code"] = self.container_type_code
+        if self.method_used:
+            d["method_used"] = self.method_used
+        if self.valid is not None:
+            d["valid"] = self.valid
+        if self.reason is not None:
+            d["reason"] = self.reason
         return d
 
 
@@ -188,7 +204,6 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
         line_text += wt
         word_spans.append((start, len(line_text)))
 
-    # Exact regex match
     if not result.container_number:
         for m in re.finditer(regex_pattern, line_text):
             candidate = m.group(0)
@@ -214,7 +229,6 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
             log.info("Regex extraction found container number: %s", candidate)
             break
 
-    # Fuzzy prefix fallback
     if not result.container_number:
         for idx, w in enumerate(words):
             wt = str(w.text).strip().replace(" ", "").upper()
@@ -245,7 +259,6 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
                 else:
                     log.debug("Fuzzy match '%s' failed ISO 6346 check digit validation", candidate)
 
-    # Container type
     if not result.container_type:
         mt = re.search(type_regex, line_text)
         if mt:
@@ -320,11 +333,9 @@ def extract_container_location(ocr_result) -> ContainerResult:
 
                 elif 4 <= len(result.container_number) < CONTAINER_NUMBER_LENGTH:
                     if orientation_horizontal:
-                        crit_met = (x1 >= last_xy[0] and
-                                    are_coordinates_within_distance(last_xy[1], y1, allowable_buffer))
+                        crit_met = (x1 >= last_xy[0] and are_coordinates_within_distance(last_xy[1], y1, allowable_buffer))
                     else:
-                        crit_met = (y1 >= last_xy[1] and
-                                    are_coordinates_within_distance(last_xy[0], x1, allowable_buffer))
+                        crit_met = (y1 >= last_xy[1] and are_coordinates_within_distance(last_xy[0], x1, allowable_buffer))
 
                     if crit_met:
                         result.container_number += clean_text
@@ -347,8 +358,12 @@ def extract_container_location(ocr_result) -> ContainerResult:
     return result
 
 
-def run_extraction_pipeline(ocr_result, image_bytes: bytes) -> ContainerResult:
-    """Run the full pipeline: regex extraction → location fallback → color detection."""
+def run_extraction_pipeline(ocr_result) -> ContainerResult:
+    """Run the full pipeline: regex extraction -> location fallback.
+    
+    Note: Color extraction is now handled by the combined pipeline after result merging
+    to avoid redundant processing.
+    """
     result = extract_container_regex(ocr_result)
 
     if not result.container_number or not result.container_type:
@@ -360,13 +375,6 @@ def run_extraction_pipeline(ocr_result, image_bytes: bytes) -> ContainerResult:
             result.bounding_box = loc.bounding_box
         if not result.container_type:
             result.container_type = loc.container_type
-
-    if result.bounding_box != [0, 0, 0, 0]:
-        try:
-            result.container_color = extract_dominant_color_from_image_bytes(image_bytes, result.bounding_box)
-        except ValueError as e:
-            log.warning("Could not extract container color: %s", e)
-            result.container_color = [0, 0, 0]
 
     if not result.container_number:
         log.info("No container number found in image")

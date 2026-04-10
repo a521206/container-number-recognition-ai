@@ -2,14 +2,17 @@
 
 import logging
 import os
+import random
 import tempfile
 import time
 from typing import Optional
 
 from llama_cloud import LlamaCloud
 
-from .config import LLAMA_CLOUD_API_KEY, LLAMA_EXTRACT_CONFIG_ID
-from .extraction import ContainerResult, Weights, WeightValue, OwnerOperator
+from ..config import LLAMA_CLOUD_API_KEY, LLAMA_EXTRACT_CONFIG_ID
+from ..extraction import ContainerResult
+from .base import ExtractionClient
+from .parser import parse_extracted_data
 
 log = logging.getLogger(__name__)
 
@@ -40,11 +43,29 @@ class LlamaExtractClient:
         log.info("LlamaExtractClient initialized with config_id=%s", self.config_id)
 
     @property
+    def name(self) -> str:
+        return "llama_extract"
+
+    @property
     def client(self) -> LlamaCloud:
         """Lazy initialization of LlamaCloud client."""
         if self._client is None:
             self._client = LlamaCloud(api_key=self.api_key)
         return self._client
+
+    @staticmethod
+    def _normalize_status(raw) -> str:
+        """Return a plain uppercase status string regardless of whether the
+        SDK gives us a string (``"COMPLETED"``), an enum with a ``.name``
+        attribute (``ExtractionStatus.COMPLETED``), or a dotted string
+        (``"ExtractionStatus.COMPLETED"``).
+        """
+        if hasattr(raw, "name"):          # proper Python enum
+            return raw.name.upper()
+        if hasattr(raw, "value"):         # enum-like with a value attribute
+            return str(raw.value).upper()
+        s = str(raw).upper()
+        return s.split(".")[-1] if "." in s else s  # "FOO.COMPLETED" → "COMPLETED"
 
     @staticmethod
     def _is_transient_error(e: Exception) -> bool:
@@ -72,7 +93,6 @@ class LlamaExtractClient:
                     raise
                 if attempt < _MAX_RETRIES - 1:
                     delay = min(_INITIAL_RETRY_DELAY * (2 ** attempt), _MAX_RETRY_DELAY)
-                    import random
                     delay += random.uniform(0, 0.5)
                     log.warning("Attempt %d failed: %s, retrying in %.1fs", attempt + 1, e, delay)
                     time.sleep(delay)
@@ -85,7 +105,8 @@ class LlamaExtractClient:
         deadline = time.monotonic() + _EXTRACT_POLL_TIMEOUT
         while True:
             try:
-                status = str(job.status) if hasattr(job, "status") else str(job)
+                raw = job.status if hasattr(job, "status") else job
+                status = self._normalize_status(raw)
                 if status in ("COMPLETED", "FAILED", "CANCELLED"):
                     break
             except Exception:
@@ -101,6 +122,7 @@ class LlamaExtractClient:
     def extract_from_file(self, file_path: str) -> ContainerResult:
         """Extract container data from a file path using Llama Extract."""
         file_obj = None
+        temp_bytes = None
         try:
             file_obj = self._with_retry(
                 lambda: self.client.files.create(
@@ -120,13 +142,15 @@ class LlamaExtractClient:
 
             job = self._wait_for_job(job)
 
-            if job.status != "COMPLETED":
+            if self._normalize_status(job.status) != "COMPLETED":
                 error_msg = getattr(job, "error_message", f"Job finished with status: {job.status}")
                 log.error("Llama Extract job %s failed: %s", job.id, error_msg)
                 return ContainerResult(error=error_msg)
 
             log.info("Llama Extract job %s completed successfully", job.id)
-            return self._parse_extract_result(job.extract_result)
+            
+            result = self._parse_extract_result(job.extract_result)
+            return result
 
         except TimeoutError as e:
             log.error("Llama Extract timeout: %s", e)
@@ -164,90 +188,17 @@ class LlamaExtractClient:
                     log.warning("Failed to delete temp file %s: %s", temp_path, cleanup_err)
 
     def _parse_extract_result(self, extract_result) -> ContainerResult:
-        """Parse Llama Extract result into a ContainerResult."""
-        result = ContainerResult()
-
+        """Parse Llama Extract result into a ContainerResult using shared parser."""
         if extract_result is None:
             log.warning("Llama Extract returned empty result")
-            result.error = "No data extracted"
-            return result
+            return ContainerResult(error="No data extracted")
 
         if isinstance(extract_result, list):
             if not extract_result:
-                result.error = "No data extracted"
-                return result
+                return ContainerResult(error="No data extracted")
             extract_result = extract_result[0]
 
         if not isinstance(extract_result, dict):
             extract_result = extract_result.__dict__ if hasattr(extract_result, "__dict__") else {}
 
-        owner_code = extract_result.get("owner_code")
-        serial_number = extract_result.get("serial_number")
-
-        if owner_code and serial_number:
-            sn = str(serial_number).strip().replace(" ", "")
-            result.container_number = f"{owner_code}{sn}"
-            result.owner_code = str(owner_code).upper()
-            result.serial_number = sn
-
-        container_id = extract_result.get("container_id")
-        if container_id and not result.container_number:
-            cid_str = str(container_id).strip()
-            parts = cid_str.split()
-            if len(parts) >= 2:
-                result.container_number = f"{parts[0]}{''.join(parts[1:])}"
-                result.owner_code = parts[0].upper()
-                result.serial_number = "".join(parts[1:])
-            else:
-                result.container_number = cid_str.replace(" ", "")
-
-        container_number = extract_result.get("container_number")
-        if container_number and not result.container_number:
-            result.container_number = str(container_number).strip().upper().replace(" ", "")
-
-        container_type = extract_result.get("container_type", "")
-        if container_type:
-            result.container_type = str(container_type).strip().upper().replace(" ", "")
-
-        status = extract_result.get("status")
-        if status:
-            result.status = str(status)
-
-        container_type_code = extract_result.get("container_type_code")
-        if container_type_code:
-            result.container_type_code = str(container_type_code).upper()
-
-        weights_data = extract_result.get("weights")
-        if weights_data and isinstance(weights_data, dict):
-            tare = weights_data.get("tare_weight", {})
-            payload = weights_data.get("payload_weight", {})
-            max_gross = weights_data.get("maximum_gross_weight", {})
-
-            result.weights = Weights(
-                tare_weight=WeightValue(
-                    pounds=int(float(tare.get("pounds"))) if tare.get("pounds") else None,
-                    kilograms=int(float(tare.get("kilograms"))) if tare.get("kilograms") else None,
-                ),
-                payload_weight=WeightValue(
-                    pounds=int(float(payload.get("pounds"))) if payload.get("pounds") else None,
-                    kilograms=int(float(payload.get("kilograms"))) if payload.get("kilograms") else None,
-                ),
-                maximum_gross_weight=WeightValue(
-                    pounds=int(float(max_gross.get("pounds"))) if max_gross.get("pounds") else None,
-                    kilograms=int(float(max_gross.get("kilograms"))) if max_gross.get("kilograms") else None,
-                ),
-            )
-
-        owner_op = extract_result.get("owner_operator")
-        if owner_op and isinstance(owner_op, dict):
-            result.owner_operator = OwnerOperator(
-                name=str(owner_op.get("name")) if owner_op.get("name") else None,
-                location=str(owner_op.get("location")) if owner_op.get("location") else None,
-            )
-
-        log.debug(
-            "Parsed result: number=%s, type=%s",
-            result.container_number or "none",
-            result.container_type or "none",
-        )
-        return result
+        return parse_extracted_data(extract_result)
