@@ -4,15 +4,13 @@ import logging
 import time
 import types
 from io import BytesIO
-from typing import Optional
 
 from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from msrest.authentication import CognitiveServicesCredentials
 
-from ..config import VISION_ENDPOINT, VISION_KEY
-from ..extraction import ContainerResult
-from ..preprocessing import downscale_image
-from .base import ExtractionClient
+from ..utils.config import VISION_ENDPOINT, VISION_KEY
+from ..processing.extraction import ContainerResult
+from ..processing.preprocessing import downscale_image
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +81,7 @@ class OCRClient:
             if not ocr_result.regions:
                 return ContainerResult(error="No text detected")
 
-            from ..extraction import run_extraction_pipeline
+            from ..processing.extraction import run_extraction_pipeline
             return run_extraction_pipeline(ocr_result)
 
         except ValueError as e:
@@ -114,7 +112,7 @@ class OCRClient:
             if not ocr_result.regions:
                 return ContainerResult(error="No text detected")
 
-            from ..extraction import run_extraction_pipeline
+            from ..processing.extraction import run_extraction_pipeline
             return run_extraction_pipeline(ocr_result)
 
         except ValueError as e:

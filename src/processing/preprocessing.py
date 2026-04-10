@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import cv2
 from typing import List, Optional
-from .config import DOWNSCALE_THRESHOLD, CROP_PADDING
+from ..utils.config import DOWNSCALE_THRESHOLD, CROP_PADDING
 
 log = logging.getLogger(__name__)
 

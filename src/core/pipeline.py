@@ -3,8 +3,8 @@
 import logging
 from typing import Optional
 
-from .clients import OCRClient, LlamaExtractClient
-from .clients.base import ExtractionClient
+from ..clients import OCRClient, LlamaExtractClient
+from ..clients.base import ExtractionClient
 
 log = logging.getLogger(__name__)
 

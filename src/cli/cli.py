@@ -5,8 +5,8 @@ import logging
 import os
 import sys
 
-from .csv_manager import update_results, save_results
-from .combined_pipeline import run_combined_extraction
+from ..utils.csv_manager import update_results, save_results
+from ..core.combined_pipeline import run_combined_extraction
 
 log = logging.getLogger(__name__)
 

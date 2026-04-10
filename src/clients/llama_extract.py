@@ -9,8 +9,8 @@ from typing import Optional
 
 from llama_cloud import LlamaCloud
 
-from ..config import LLAMA_CLOUD_API_KEY, LLAMA_EXTRACT_CONFIG_ID
-from ..extraction import ContainerResult
+from ..utils.config import LLAMA_CLOUD_API_KEY, LLAMA_EXTRACT_CONFIG_ID
+from ..processing.extraction import ContainerResult
 from .base import ExtractionClient
 from .parser import parse_extracted_data
 

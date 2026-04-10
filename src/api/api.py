@@ -3,7 +3,7 @@
 import logging
 from fastapi import FastAPI, File, UploadFile, HTTPException
 
-from .combined_pipeline import run_combined_extraction_from_bytes
+from ..core.combined_pipeline import run_combined_extraction_from_bytes
 
 log = logging.getLogger(__name__)
 

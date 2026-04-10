@@ -3,7 +3,7 @@
 import logging
 from typing import Protocol, Optional
 
-from ..extraction import ContainerResult
+from ..processing.extraction import ContainerResult
 
 log = logging.getLogger(__name__)
 

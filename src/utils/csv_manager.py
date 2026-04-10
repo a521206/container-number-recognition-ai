@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict
 
 from .config import DATA_DIR
-from .extraction import ContainerResult
+from ..processing.extraction import ContainerResult
 
 RESULTS_CSV = os.path.join(DATA_DIR, "results.csv")
 

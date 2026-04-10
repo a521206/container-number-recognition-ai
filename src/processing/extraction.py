@@ -4,15 +4,15 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
-from .config import (
+from ..utils.config import (
     CARRIER_PREFIXES, CARRIER_PREFIX_SET, CONTAINER_TYPE_PREFIXES,
     SPATIAL_BUFFER, CONTAINER_NUMBER_LENGTH, PREFIX_FUZZY_MAP,
 )
-from .geometry import (
+from ..utils.geometry import (
     parse_word_bounding_box, is_bounding_box_horizontal,
     get_bounding_box_half_min_extent, are_coordinates_within_distance,
 )
-from .validation import validate_iso6346_check_digit
+from ..utils.validation import validate_iso6346_check_digit
 
 log = logging.getLogger(__name__)
 
@@ -208,7 +208,6 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
         for m in re.finditer(regex_pattern, line_text):
             candidate = m.group(0)
             if not validate_iso6346_check_digit(candidate):
-                log.debug("Regex match '%s' failed ISO 6346 check digit validation", candidate)
                 continue
             result.container_number = candidate
             match_start, match_end = m.start(), m.end()
@@ -226,7 +225,6 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
                     bb[2] = max(bb[2], wx2)
                     bb[3] = max(bb[3], wy2)
             result.bounding_box = bb
-            log.info("Regex extraction found container number: %s", candidate)
             break
 
     if not result.container_number:
@@ -254,16 +252,12 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
                 if validate_iso6346_check_digit(candidate):
                     result.container_number = candidate
                     result.bounding_box = bb
-                    log.info("Fuzzy prefix extraction found container number: %s", candidate)
                     break
-                else:
-                    log.debug("Fuzzy match '%s' failed ISO 6346 check digit validation", candidate)
 
     if not result.container_type:
         mt = re.search(type_regex, line_text)
         if mt:
             result.container_type = mt.group(0)
-            log.debug("Found container type: %s", result.container_type)
 
     return bool(result.container_number) and bool(result.container_type)
 
@@ -291,11 +285,6 @@ def extract_container_regex(ocr_result) -> ContainerResult:
                 break
         if result.container_number and result.container_type:
             break
-
-    if result.container_number:
-        log.debug("Regex extraction result: %s type=%s", result.container_number, result.container_type or "not found")
-    else:
-        log.debug("Regex extraction found no container number")
 
     return result
 
@@ -349,12 +338,6 @@ def extract_container_location(ocr_result) -> ContainerResult:
                 allowable_buffer = get_bounding_box_half_min_extent(bbox8) * 3 or allowable_buffer
 
     result.bounding_box = bound_block
-
-    if result.container_number:
-        log.debug("Location extraction result: %s type=%s", result.container_number, result.container_type or "not found")
-    else:
-        log.debug("Location extraction found no container number")
-
     return result
 
 

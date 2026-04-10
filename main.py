@@ -20,8 +20,8 @@ logging.getLogger("azure.ai.documentintelligence").setLevel(logging.WARNING)
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "api":
         import uvicorn
-        from src.api import app
+        from src.api.api import app
         uvicorn.run(app, host="0.0.0.0", port=8000)
     else:
-        from src.cli import main
+        from src.cli.cli import main
         main()
