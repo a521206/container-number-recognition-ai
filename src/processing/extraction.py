@@ -2,8 +2,14 @@
 
 import logging
 import re
-from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
+from .models import (
+    ContainerResult,
+    MergedOCRLine,
+    WeightValue,
+    OwnerOperator,
+    Weights,
+)
 from ..utils.config import (
     CARRIER_PREFIXES, CARRIER_PREFIX_SET, CONTAINER_TYPE_PREFIXES,
     SPATIAL_BUFFER, CONTAINER_NUMBER_LENGTH, PREFIX_FUZZY_MAP,
@@ -16,122 +22,30 @@ from ..utils.validation import validate_iso6346_check_digit
 
 log = logging.getLogger(__name__)
 
-
-@dataclass
-class WeightValue:
-    """Weight in pounds and kilograms."""
-    pounds: Optional[int] = None
-    kilograms: Optional[int] = None
-
-    def to_dict(self) -> Optional[dict]:
-        if self.pounds is None and self.kilograms is None:
-            return None
-        return {"pounds": self.pounds, "kilograms": self.kilograms}
+_PREFIX_PATTERN = None
+_TYPE_PATTERN_CACHE = {}
+_LOCATION_TYPE_REGEX = None
 
 
-@dataclass
-class OwnerOperator:
-    """Container owner/operator details."""
-    name: Optional[str] = None
-    location: Optional[str] = None
-
-    def to_dict(self) -> Optional[dict]:
-        if self.name is None and self.location is None:
-            return None
-        return {"name": self.name, "location": self.location}
+def _get_prefix_pattern():
+    global _PREFIX_PATTERN
+    if _PREFIX_PATTERN is None:
+        prefix_pattern = "|".join(CARRIER_PREFIXES)
+        _PREFIX_PATTERN = re.compile(f"({prefix_pattern})(\\d{{7}})")
+    return _PREFIX_PATTERN
 
 
-@dataclass
-class Weights:
-    """Container weight specifications."""
-    tare_weight: WeightValue = field(default_factory=WeightValue)
-    payload_weight: WeightValue = field(default_factory=WeightValue)
-    maximum_gross_weight: WeightValue = field(default_factory=WeightValue)
-
-    def to_dict(self) -> Optional[dict]:
-        d = {
-            "tare_weight": self.tare_weight.to_dict(),
-            "payload_weight": self.payload_weight.to_dict(),
-            "maximum_gross_weight": self.maximum_gross_weight.to_dict(),
-        }
-        if all(v is None for v in d.values()):
-            return None
-        return d
+def _get_type_pattern(type_regex: str):
+    if type_regex not in _TYPE_PATTERN_CACHE:
+        _TYPE_PATTERN_CACHE[type_regex] = re.compile(type_regex)
+    return _TYPE_PATTERN_CACHE[type_regex]
 
 
-@dataclass
-class ContainerResult:
-    """Result of container detection."""
-    file_name: str = ""
-    container_number: str = ""
-    container_type: str = ""
-    bounding_box: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
-    container_color: List[int] = field(default_factory=lambda: [0, 0, 0])
-    error: Optional[str] = None
-    status: Optional[str] = None
-    weights: Optional[Weights] = None
-    owner_code: Optional[str] = None
-    container_id: Optional[str] = None
-    serial_number: Optional[str] = None
-    owner_operator: Optional[OwnerOperator] = None
-    container_type_code: Optional[str] = None
-    method_used: Optional[str] = None
-    valid: Optional[bool] = None
-    reason: Optional[str] = None
-
-    def _derive_fields(self) -> None:
-        """Populate structured fields from container_number and container_type (idempotent)."""
-        if self.owner_code is not None:
-            return
-        if not self.container_number or len(self.container_number) != 11:
-            return
-        self.owner_code = self.container_number[:4]
-        self.serial_number = self.container_number[4:]
-        self.container_id = f"{self.owner_code} {self.serial_number[:6]} {self.serial_number[6]}"
-        if self.container_type:
-            self.container_type_code = self.container_type
-
-    def to_dict(self) -> dict:
-        self._derive_fields()
-        d: dict = {}
-        if self.file_name:
-            d["file_name"] = self.file_name
-        if self.error:
-            d["error"] = self.error
-            return d
-        if self.container_number:
-            d["container_number"] = self.container_number
-        if self.container_type:
-            d["container_type"] = self.container_type
-        if self.bounding_box and self.bounding_box != [0, 0, 0, 0]:
-            d["bounding_box"] = self.bounding_box
-        if self.container_color and self.container_color != [0, 0, 0]:
-            d["container_color"] = self.container_color
-        if self.status is not None:
-            d["status"] = self.status
-        if self.weights is not None:
-            w = self.weights.to_dict()
-            if w is not None:
-                d["weights"] = w
-        if self.owner_code is not None:
-            d["owner_code"] = self.owner_code
-        if self.container_id is not None:
-            d["container_id"] = self.container_id
-        if self.serial_number is not None:
-            d["serial_number"] = self.serial_number
-        if self.owner_operator is not None:
-            oo = self.owner_operator.to_dict()
-            if oo is not None:
-                d["owner_operator"] = oo
-        if self.container_type_code is not None:
-            d["container_type_code"] = self.container_type_code
-        if self.method_used:
-            d["method_used"] = self.method_used
-        if self.valid is not None:
-            d["valid"] = self.valid
-        if self.reason is not None:
-            d["reason"] = self.reason
-        return d
+def _get_location_type_regex():
+    global _LOCATION_TYPE_REGEX
+    if _LOCATION_TYPE_REGEX is None:
+        _LOCATION_TYPE_REGEX = re.compile(f"\\d{{2}}({'|'.join(CONTAINER_TYPE_PREFIXES)})")
+    return _LOCATION_TYPE_REGEX
 
 
 def _find_matching_carrier_prefix(text: str) -> Optional[str]:
@@ -143,15 +57,6 @@ def _find_matching_carrier_prefix(text: str) -> Optional[str]:
     if matches:
         return matches[0]
     return None
-
-
-class MergedOCRLine:
-    """Synthetic line produced by merging vertically-overlapping OCR lines."""
-    __slots__ = ("words", "bounding_box")
-
-    def __init__(self, words: list, bounding_box: str = "") -> None:
-        self.words = words
-        self.bounding_box = bounding_box
 
 
 def _get_line_vertical_bounds(line) -> Tuple[float, float]:
@@ -193,19 +98,20 @@ def _merge_vertically_overlapping_lines(lines) -> list:
 
 def _extract_container_from_words(words, result: ContainerResult, type_regex: str) -> bool:
     """Extract container number and type from a flat list of words using regex. Returns True if both found."""
-    prefix_pattern = "|".join(CARRIER_PREFIXES)
-    regex_pattern = f"({prefix_pattern})(\\d{{7}})"
+    cleaned_words = [str(w.text).strip().replace(" ", "").upper() for w in words]
 
     word_spans: List[Tuple[int, int]] = []
     line_text = ""
-    for w in words:
-        wt = str(w.text).strip().replace(" ", "").upper()
+    for wt in cleaned_words:
         start = len(line_text)
         line_text += wt
         word_spans.append((start, len(line_text)))
 
+    prefix_pattern = _get_prefix_pattern()
+    type_pattern = _get_type_pattern(type_regex)
+
     if not result.container_number:
-        for m in re.finditer(regex_pattern, line_text):
+        for m in prefix_pattern.finditer(line_text):
             candidate = m.group(0)
             if not validate_iso6346_check_digit(candidate):
                 continue
@@ -213,11 +119,10 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
             match_start, match_end = m.start(), m.end()
             bb: List[int] = [0, 0, 0, 0]
             bb_set = False
-            for idx, w in enumerate(words):
-                ws, we = word_spans[idx]
+            for idx, (ws, we) in enumerate(word_spans):
                 if we <= match_start or ws >= match_end:
                     continue
-                wx1, wy1, wx2, wy2 = parse_word_bounding_box(w)
+                wx1, wy1, wx2, wy2 = parse_word_bounding_box(words[idx])
                 if not bb_set:
                     bb = [wx1, wy1, wx2, wy2]
                     bb_set = True
@@ -228,21 +133,20 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
             break
 
     if not result.container_number:
-        for idx, w in enumerate(words):
-            wt = str(w.text).strip().replace(" ", "").upper()
+        for idx, wt in enumerate(cleaned_words):
             matched_prefix = _find_matching_carrier_prefix(wt)
             if matched_prefix is None:
                 continue
             serial_digits = ""
-            wx1, wy1, wx2, wy2 = parse_word_bounding_box(w)
+            wx1, wy1, wx2, wy2 = parse_word_bounding_box(words[idx])
             bb = [wx1, wy1, wx2, wy2]
-            for w2 in words[idx + 1:]:
-                w2t = str(w2.text).strip().replace(" ", "").upper()
+            for j in range(idx + 1, len(cleaned_words)):
+                w2t = cleaned_words[j]
                 digits_only = "".join(ch for ch in w2t if ch.isdigit())
                 if not digits_only:
                     break
                 serial_digits += digits_only
-                _, _, w2x2, w2y2 = parse_word_bounding_box(w2)
+                _, _, w2x2, w2y2 = parse_word_bounding_box(words[j])
                 bb[2] = max(bb[2], w2x2)
                 bb[3] = max(bb[3], w2y2)
                 if len(serial_digits) >= 7:
@@ -255,7 +159,7 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
                     break
 
     if not result.container_type:
-        mt = re.search(type_regex, line_text)
+        mt = type_pattern.search(line_text)
         if mt:
             result.container_type = mt.group(0)
 
@@ -297,7 +201,7 @@ def extract_container_location(ocr_result) -> ContainerResult:
     last_xy: List[int] = []
     allowable_buffer = SPATIAL_BUFFER
 
-    type_regex = f"\\d{{2}}({'|'.join(CONTAINER_TYPE_PREFIXES)})"
+    location_type_regex = _get_location_type_regex()
 
     for region in ocr_result.regions:
         if not region.lines:
@@ -332,7 +236,7 @@ def extract_container_location(ocr_result) -> ContainerResult:
                         bound_block[2] = max(bound_block[2], x2)
                         bound_block[3] = max(bound_block[3], y2)
 
-                if not result.container_type and re.search(type_regex, clean_text):
+                if not result.container_type and location_type_regex.search(clean_text):
                     result.container_type = clean_text
 
                 allowable_buffer = get_bounding_box_half_min_extent(bbox8) * 3 or allowable_buffer
@@ -343,15 +247,10 @@ def extract_container_location(ocr_result) -> ContainerResult:
 
 def run_extraction_pipeline(ocr_result) -> ContainerResult:
     """Run the full pipeline: regex extraction -> location fallback.
-    
-    Note: Color extraction is now handled by the combined pipeline after result merging
-    to avoid redundant processing.
     """
     result = extract_container_regex(ocr_result)
 
     if not result.container_number or not result.container_type:
-        log.info("Regex extraction incomplete (number=%s, type=%s), falling back to location extraction",
-                 result.container_number or "none", result.container_type or "none")
         loc = extract_container_location(ocr_result)
         if not result.container_number:
             result.container_number = loc.container_number

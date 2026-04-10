@@ -1,12 +1,59 @@
-"""Unified post-processing for extraction results."""
+"""Post-processing utilities for extraction results."""
 
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
+
+import cv2
+import numpy as np
+from ..utils.config import CROP_PADDING
 
 from .extraction import ContainerResult
-from .preprocessing import extract_dominant_color_from_image_bytes
 
 log = logging.getLogger(__name__)
+
+
+def get_dominant_color(image: np.ndarray) -> List[int]:
+    """Get most dominant color [B, G, R] from image."""
+    colors, count = np.unique(image.reshape(-1, image.shape[-1]), axis=0, return_counts=True)
+    return colors[count.argmax()].tolist()
+
+
+def extract_dominant_color_from_image_bytes(
+    image_bytes: bytes,
+    crop_zone: Optional[List[int]] = None,
+) -> List[int]:
+    """Extract dominant container color from image bytes.
+
+    Uses centre quarter of image if crop_zone is None or invalid.
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Could not decode image bytes – unsupported format or corrupted data")
+
+    h, w = img.shape[:2]
+
+    if not crop_zone or crop_zone == [0, 0, 0, 0]:
+        x1, y1, x2, y2 = w // 4, h // 4, 3 * w // 4, 3 * h // 4
+        log.debug("No crop zone provided – using centre region (%d,%d,%d,%d)", x1, y1, x2, y2)
+    else:
+        x1, y1, x2, y2 = crop_zone
+
+    crop_x1 = max(0, x1 - CROP_PADDING)
+    crop_y1 = max(0, y1 - CROP_PADDING)
+    crop_x2 = min(w, x2 + CROP_PADDING)
+    crop_y2 = min(h, y2 + CROP_PADDING)
+
+    if crop_x2 <= crop_x1 or crop_y2 <= crop_y1:
+        log.warning(
+            "Crop zone resulted in empty region (x=%d-%d, y=%d-%d) on %dx%d image",
+            crop_x1, crop_x2, crop_y1, crop_y2, w, h,
+        )
+        raise ValueError(f"Crop zone {crop_zone} produced empty region on {w}x{h} image")
+
+    cropped = img[crop_y1:crop_y2, crop_x1:crop_x2]
+    log.debug("Cropped image to region (%d, %d, %d, %d) from %dx%d", crop_x1, crop_y1, crop_x2, crop_y2, w, h)
+    return get_dominant_color(cropped)
 
 
 def post_process_result(
@@ -14,11 +61,9 @@ def post_process_result(
     image_bytes: bytes,
     bounding_box: Optional[Tuple[int, int, int, int]] = None,
 ) -> ContainerResult:
-    """Post-process an extraction result to ensure consistent output.
+    """Post-process extraction result to ensure consistent output.
 
-    Fills in ``container_color`` when it is missing or the zero-default,
-    delegating all color-extraction and centre-region fallback logic to
-    :func:`preprocessing.extract_dominant_color_from_image_bytes`.
+    Fills in container_color when missing or zero-default.
     """
     if not result.container_number:
         return result
@@ -29,8 +74,6 @@ def post_process_result(
             crop_zone = list(bounding_box)
         elif result.bounding_box and result.bounding_box != [0, 0, 0, 0]:
             crop_zone = result.bounding_box
-        # If crop_zone is still None, extract_dominant_color_from_image_bytes
-        # will fall back to the centre region automatically.
         try:
             color = extract_dominant_color_from_image_bytes(image_bytes, crop_zone)
             result.container_color = color

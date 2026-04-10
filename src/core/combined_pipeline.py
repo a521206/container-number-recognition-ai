@@ -1,7 +1,8 @@
 """Combined extraction pipeline using OCR and Llama Extract together."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, Tuple
 
 from ..clients import OCRClient, LlamaExtractClient
@@ -73,18 +74,12 @@ def run_combined_extraction(
     """Run both OCR and Llama Extract from a file path, then combine results.
 
     Strategy:
-    1. OCR  — faster, provides bounding box + color
-    2. Llama Extract — richer fields (weights, owner_operator)
-    3. combine_results() validates and merges
+    1. Read image file as bytes
+    2. Delegate to run_combined_extraction_from_bytes
     """
-    ocr_client = get_client(ExtractionMethod.OCR)
-    llama_client = get_client(ExtractionMethod.LLAMA_EXTRACT)
     img_bytes = image_bytes or _read_image_bytes(image_path)
-    return _run_clients(
-        lambda: ocr_client.extract_from_file(image_path),
-        lambda: llama_client.extract_from_file(image_path),
-        img_bytes,
-    )
+    filename = os.path.basename(image_path) if image_path else "image.jpg"
+    return run_combined_extraction_from_bytes(img_bytes, filename)
 
 
 def run_combined_extraction_from_bytes(

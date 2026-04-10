@@ -1,7 +1,7 @@
 """Base extraction client protocol."""
 
 import logging
-from typing import Protocol, Optional
+from typing import Protocol
 
 from ..processing.extraction import ContainerResult
 
@@ -14,10 +14,6 @@ class ExtractionClient(Protocol):
     @property
     def name(self) -> str:
         """Return the name of the extraction method."""
-        ...
-
-    def extract_from_file(self, file_path: str) -> ContainerResult:
-        """Extract container data from a file path."""
         ...
 
     def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:

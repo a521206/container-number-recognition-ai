@@ -9,7 +9,7 @@ from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from msrest.authentication import CognitiveServicesCredentials
 
 from ..utils.config import VISION_ENDPOINT, VISION_KEY
-from ..processing.extraction import ContainerResult
+from ..processing.extraction import ContainerResult, run_extraction_pipeline
 from ..processing.preprocessing import downscale_image
 
 log = logging.getLogger(__name__)
@@ -64,36 +64,6 @@ class OCRClient:
 
         return types.SimpleNamespace(regions=pages)
 
-    def extract_from_file(self, file_path: str) -> ContainerResult:
-        """Extract container data from a file path using OCR."""
-        import cv2
-        
-        try:
-            img = cv2.imread(file_path)
-            if img is None:
-                return ContainerResult(error=f"Could not read image: {file_path}")
-
-            img = downscale_image(img)
-            _, encoded = cv2.imencode('.JPG', img)
-            img_bytes = encoded.tobytes()
-
-            ocr_result = self.recognize_printed_text(img_bytes)
-            if not ocr_result.regions:
-                return ContainerResult(error="No text detected")
-
-            from ..processing.extraction import run_extraction_pipeline
-            return run_extraction_pipeline(ocr_result)
-
-        except ValueError as e:
-            log.error("Validation error processing %s: %s", file_path, e)
-            return ContainerResult(error=str(e))
-        except TimeoutError as e:
-            log.error("OCR timeout processing %s: %s", file_path, e)
-            return ContainerResult(error=str(e))
-        except Exception as e:
-            log.exception("Unexpected error processing %s", file_path)
-            return ContainerResult(error=f"{type(e).__name__}: {e}")
-
     def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:
         """Extract container data from image bytes using OCR."""
         import cv2
@@ -112,7 +82,6 @@ class OCRClient:
             if not ocr_result.regions:
                 return ContainerResult(error="No text detected")
 
-            from ..processing.extraction import run_extraction_pipeline
             return run_extraction_pipeline(ocr_result)
 
         except ValueError as e:

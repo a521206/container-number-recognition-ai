@@ -1,9 +1,7 @@
 """Llama Extract client for container number extraction using official SDK."""
 
 import logging
-import os
 import random
-import tempfile
 import time
 from typing import Optional
 
@@ -11,7 +9,6 @@ from llama_cloud import LlamaCloud
 
 from ..utils.config import LLAMA_CLOUD_API_KEY, LLAMA_EXTRACT_CONFIG_ID
 from ..processing.extraction import ContainerResult
-from .base import ExtractionClient
 from .parser import parse_extracted_data
 
 log = logging.getLogger(__name__)
@@ -119,14 +116,15 @@ class LlamaExtractClient:
             job = self._with_retry(lambda: self.client.extract.get(job.id))
         return job
 
-    def extract_from_file(self, file_path: str) -> ContainerResult:
-        """Extract container data from a file path using Llama Extract."""
+    def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:
+        """Extract container data from image bytes using Llama Extract."""
         file_obj = None
-        temp_bytes = None
         try:
+            import mimetypes
+            mime_type = mimetypes.guess_type(filename)[0] or "image/jpeg"
             file_obj = self._with_retry(
                 lambda: self.client.files.create(
-                    file=file_path,
+                    file=(filename, data, mime_type),
                     purpose="extract",
                 )
             )
@@ -148,7 +146,7 @@ class LlamaExtractClient:
                 return ContainerResult(error=error_msg)
 
             log.info("Llama Extract job %s completed successfully", job.id)
-            
+
             result = self._parse_extract_result(job.extract_result)
             return result
 
@@ -156,7 +154,7 @@ class LlamaExtractClient:
             log.error("Llama Extract timeout: %s", e)
             return ContainerResult(error=str(e))
         except Exception as e:
-            log.exception("Llama Extract error for %s", file_path)
+            log.exception("Llama Extract error for bytes (filename=%s)", filename)
             return ContainerResult(error=f"LlamaExtractError: {e}")
         finally:
             if file_obj:
@@ -165,27 +163,6 @@ class LlamaExtractClient:
                     log.debug("Deleted uploaded file: %s", file_obj.id)
                 except Exception as cleanup_err:
                     log.warning("Failed to delete uploaded file %s: %s", file_obj.id, cleanup_err)
-
-    def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:
-        """Extract container data from image bytes using Llama Extract."""
-        temp_path = None
-        try:
-            suffix = os.path.splitext(filename)[1] or ".jpg"
-            fd, temp_path = tempfile.mkstemp(suffix=suffix)
-            try:
-                os.write(fd, data)
-            finally:
-                os.close(fd)
-            return self.extract_from_file(temp_path)
-        except Exception as e:
-            log.exception("Llama Extract error for bytes (filename=%s)", filename)
-            return ContainerResult(error=f"LlamaExtractError: {e}")
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception as cleanup_err:
-                    log.warning("Failed to delete temp file %s: %s", temp_path, cleanup_err)
 
     def _parse_extract_result(self, extract_result) -> ContainerResult:
         """Parse Llama Extract result into a ContainerResult using shared parser."""
