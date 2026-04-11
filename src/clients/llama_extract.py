@@ -1,8 +1,7 @@
 """Llama Extract client for container number extraction using official SDK."""
 
 import logging
-import random
-import time
+import mimetypes
 from typing import Optional
 
 from llama_cloud import LlamaCloud
@@ -13,11 +12,7 @@ from .parser import parse_extracted_data
 
 log = logging.getLogger(__name__)
 
-_EXTRACT_POLL_INTERVAL = 2
 _EXTRACT_POLL_TIMEOUT = 120
-_MAX_RETRIES = 3
-_INITIAL_RETRY_DELAY = 0.5
-_MAX_RETRY_DELAY = 8
 
 
 class LlamaExtractClient:
@@ -50,105 +45,30 @@ class LlamaExtractClient:
             self._client = LlamaCloud(api_key=self.api_key)
         return self._client
 
-    @staticmethod
-    def _normalize_status(raw) -> str:
-        """Return a plain uppercase status string regardless of whether the
-        SDK gives us a string (``"COMPLETED"``), an enum with a ``.name``
-        attribute (``ExtractionStatus.COMPLETED``), or a dotted string
-        (``"ExtractionStatus.COMPLETED"``).
-        """
-        if hasattr(raw, "name"):          # proper Python enum
-            return raw.name.upper()
-        if hasattr(raw, "value"):         # enum-like with a value attribute
-            return str(raw.value).upper()
-        s = str(raw).upper()
-        return s.split(".")[-1] if "." in s else s  # "FOO.COMPLETED" → "COMPLETED"
-
-    @staticmethod
-    def _is_transient_error(e: Exception) -> bool:
-        """Check if error is transient (network/API issues)."""
-        transient_types = (
-            ConnectionError,
-            TimeoutError,
-            OSError,
-        )
-        transient_messages = ("connection", "timeout", "network", "temporarily unavailable", "429", "503")
-        if isinstance(e, transient_types):
-            return True
-        error_str = str(e).lower()
-        return any(msg in error_str for msg in transient_messages)
-
-    def _with_retry(self, func, *args, **kwargs):
-        """Execute function with retry logic and exponential backoff."""
-        last_error = None
-        for attempt in range(_MAX_RETRIES):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_error = e
-                if not self._is_transient_error(e):
-                    raise
-                if attempt < _MAX_RETRIES - 1:
-                    delay = min(_INITIAL_RETRY_DELAY * (2 ** attempt), _MAX_RETRY_DELAY)
-                    delay += random.uniform(0, 0.5)
-                    log.warning("Attempt %d failed: %s, retrying in %.1fs", attempt + 1, e, delay)
-                    time.sleep(delay)
-        if last_error:
-            raise last_error
-        raise RuntimeError("Retry logic failed without capturing an error")
-
-    def _wait_for_job(self, job):
-        """Poll for job completion with retry logic."""
-        deadline = time.monotonic() + _EXTRACT_POLL_TIMEOUT
-        while True:
-            try:
-                raw = job.status if hasattr(job, "status") else job
-                status = self._normalize_status(raw)
-                if status in ("COMPLETED", "FAILED", "CANCELLED"):
-                    break
-            except Exception:
-                pass
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Job {getattr(job, 'id', 'unknown')} timed out after {_EXTRACT_POLL_TIMEOUT}s"
-                )
-            time.sleep(_EXTRACT_POLL_INTERVAL)
-            job = self._with_retry(lambda: self.client.extract.get(job.id))
-        return job
-
     def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:
         """Extract container data from image bytes using Llama Extract."""
         file_obj = None
         try:
-            import mimetypes
             mime_type = mimetypes.guess_type(filename)[0] or "image/jpeg"
-            file_obj = self._with_retry(
-                lambda: self.client.files.create(
-                    file=(filename, data, mime_type),
-                    purpose="extract",
-                )
+            file_obj = self.client.files.create(
+                file=(filename, data, mime_type),
+                purpose="extract",
             )
             log.debug("File uploaded: %s", file_obj.id)
 
-            job = self._with_retry(
-                lambda: self.client.extract.create(
-                    file_input=file_obj.id,
-                    configuration_id=self.config_id,
-                )
+            job = self.client.extract.run(
+                file_input=file_obj.id,
+                configuration_id=self.config_id,
+                polling_timeout=_EXTRACT_POLL_TIMEOUT,
             )
             log.debug("Extraction job created: %s (status=%s)", job.id, job.status)
 
-            job = self._wait_for_job(job)
-
-            if self._normalize_status(job.status) != "COMPLETED":
-                error_msg = getattr(job, "error_message", f"Job finished with status: {job.status}")
-                log.error("Llama Extract job %s failed: %s", job.id, error_msg)
-                return ContainerResult(error=error_msg)
+            if job.status.upper() != "COMPLETED":
+                log.error("Llama Extract job %s failed: %s", job.id, job.error_message)
+                return ContainerResult(error=job.error_message or f"Job finished with status: {job.status}")
 
             log.info("Llama Extract job %s completed successfully", job.id)
-
-            result = self._parse_extract_result(job.extract_result)
-            return result
+            return self._parse_extract_result(job.extract_result)
 
         except TimeoutError as e:
             log.error("Llama Extract timeout: %s", e)

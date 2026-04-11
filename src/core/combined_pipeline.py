@@ -119,18 +119,18 @@ def combine_results(
     """Combine results from OCR and Llama Extract.
 
     Priority:
-    1. Both have container_number and they match  → "combined"
-    2. Only one has container_number              → use that
-    3. Both differ, one passes ISO 6346           → use the valid one
-    4. Both differ, both valid                    → prefer OCR (has bbox)
-    5. Both differ, both invalid                  → prefer Llama (more fields)
+    1. Both match → validate, use combined if valid, else invalid
+    2. Both differ, one valid → use the valid one
+    3. Both differ, both valid → prefer OCR (has bbox)
+    4. Both differ, both invalid → prefer Llama (more fields)
+    5. Only one has container_number → use that
 
     The returned ContainerResult always has ``method_used`` set.
     """
     if not ocr_result and not llama_result:
         return ContainerResult(error="All extraction methods failed", method_used="none"), "none"
 
-    # ④ Save error messages BEFORE nulling so we can report them at the bottom.
+    # Save error messages before nulling results.
     ocr_error = ocr_result.error if ocr_result else None
     llama_error = llama_result.error if llama_result else None
 
@@ -148,7 +148,12 @@ def combine_results(
 
         if ocr_num == llama_num:
             log.info("Both methods returned matching container number: %s", ocr_num)
-            return _finish(_merge_results(ocr_result, llama_result), "combined", image_bytes)
+            if validate_iso6346_check_digit(ocr_num):
+                return _finish(_merge_results(ocr_result, llama_result), "combined", image_bytes)
+            log.warning("Matched container number %s failed validation", ocr_num)
+            result = _merge_results(ocr_result, llama_result)
+            result.valid = False
+            return _finish(result, "combined", image_bytes)
 
         log.warning("Container number mismatch – OCR: %s, Llama: %s", ocr_num, llama_num)
         ocr_valid = validate_iso6346_check_digit(ocr_num)
@@ -164,7 +169,9 @@ def combine_results(
             log.warning("Both valid but different – using OCR (has bbox)")
             return _finish(ocr_result, "ocr", image_bytes)
         log.warning("Both invalid – using Llama (more fields)")
-        return _finish(_merge_results(llama_result, ocr_result), "llama_extract", image_bytes)
+        result = _merge_results(llama_result, ocr_result)
+        result.valid = False
+        return _finish(result, "llama_extract", image_bytes)
 
     if has_ocr:
         log.info("Using OCR result (Llama failed or no result)")

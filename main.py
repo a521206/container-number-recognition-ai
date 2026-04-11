@@ -13,9 +13,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# Reduce verbose Azure SDK logging
+# Reduce verbose logging
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.ai.documentintelligence").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "api":
