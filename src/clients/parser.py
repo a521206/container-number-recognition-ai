@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from ..processing.extraction import ContainerResult, Weights, WeightValue, OwnerOperator
+from ..processing.models import ContainerResult, Weights, WeightValue, OwnerOperator
 from ..utils.validation import validate_iso6346_check_digit
 
 log = logging.getLogger(__name__)

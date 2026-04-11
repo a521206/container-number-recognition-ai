@@ -3,13 +3,7 @@
 import logging
 import re
 from typing import List, Tuple, Optional
-from .models import (
-    ContainerResult,
-    MergedOCRLine,
-    WeightValue,
-    OwnerOperator,
-    Weights,
-)
+from .models import ContainerResult, MergedOCRLine
 from ..utils.config import (
     CARRIER_PREFIXES, CARRIER_PREFIX_SET, CONTAINER_TYPE_PREFIXES,
     SPATIAL_BUFFER, CONTAINER_NUMBER_LENGTH, PREFIX_FUZZY_MAP,
