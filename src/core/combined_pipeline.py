@@ -102,11 +102,9 @@ def run_combined_extraction_from_bytes(
 
 
 def _finish(result: ContainerResult, method: str, image_bytes: bytes) -> Tuple[ContainerResult, str]:
-    """Post-process *result*, derive structured fields, stamp ``method_used``."""
+    """Post-process *result* and set valid flag if not already decided."""
     result = post_process_result(result, image_bytes)
-    result._derive_fields()   # populate owner_code/serial_number/container_id for CSV
-    result.method_used = method
-    if result.container_number:
+    if result.container_number and result.valid is None:
         result.valid = validate_iso6346_check_digit(result.container_number)
     return result, method
 
@@ -128,7 +126,7 @@ def combine_results(
     The returned ContainerResult always has ``method_used`` set.
     """
     if not ocr_result and not llama_result:
-        return ContainerResult(error="All extraction methods failed", method_used="none"), "none"
+        return ContainerResult(error="All extraction methods failed"), "none"
 
     # Save error messages before nulling results.
     ocr_error = ocr_result.error if ocr_result else None
@@ -179,14 +177,14 @@ def combine_results(
 
     if has_llama:
         log.info("Using Llama result (OCR failed or no result)")
-        return _finish(_merge_results(llama_result, None), "llama_extract", image_bytes)
+        return _finish(llama_result, "llama_extract", image_bytes)
 
     error_parts = []
     if ocr_error:
         error_parts.append(f"OCR: {ocr_error}")
     if llama_error:
         error_parts.append(f"Llama: {llama_error}")
-    return ContainerResult(valid=False, reason=f"All methods failed: {'; '.join(error_parts)}", method_used="none"), "none"
+    return ContainerResult(valid=False, reason=f"All methods failed: {'; '.join(error_parts)}"), "none"
 
 
 def _merge_results(
@@ -221,11 +219,6 @@ def _merge_results(
         result.owner_operator = primary.owner_operator
     elif secondary and secondary.owner_operator:
         result.owner_operator = secondary.owner_operator
-
-    if primary.status:
-        result.status = primary.status
-    elif secondary and secondary.status:
-        result.status = secondary.status
 
     return result
 

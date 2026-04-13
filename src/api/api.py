@@ -20,7 +20,9 @@ async def detect_container(file: UploadFile = File(...)):
     
     result, method = run_combined_extraction_from_bytes(contents, filename=file.filename)
     log.info("Combined result for %s: container=%s type=%s method=%s", file.filename, result.container_number or "none", result.container_type or "none", method)
-    return result.to_dict()
+    response = result.to_dict()
+    response["method_used"] = method
+    return response
 
 
 @app.get("/health")

@@ -1,7 +1,7 @@
 """Tests for container number recognition."""
 
 import pytest
-from src.validation import validate_iso6346_check_digit
+from src.utils.validation import validate_iso6346_check_digit
 
 
 class TestValidation:

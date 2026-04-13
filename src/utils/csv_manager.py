@@ -15,11 +15,6 @@ RESULT_COLUMNS = [
     "container_number",
     "container_type",
     "container_color",
-    "owner_code",
-    "serial_number",
-    "container_id",
-    "container_type_code",
-    "status",
     "valid",
     "reason",
     "tare_weight_kg",
@@ -31,7 +26,6 @@ RESULT_COLUMNS = [
     "owner_operator_name",
     "owner_operator_location",
     "bounding_box",
-    "method_used",
     "timestamp",
 ]
 
@@ -67,34 +61,23 @@ def _container_result_to_dict(result: ContainerResult) -> Dict[str, str]:
     d: Dict[str, str] = {}
     
     d["file_name"] = result.file_name or ""
-    d["timestamp"] = datetime.now(timezone.utc).isoformat()
+    d["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     
     if not result:
         return d
     
-    if result.valid is False and result.reason:
-        d["container_number"] = ""
-        d["valid"] = "False"
-        d["reason"] = result.reason
-        return d
+    # Always preserve extracted data, even if validation failed
+    d["container_number"] = result.container_number or result.raw_container_number or ""
+    d["container_type"] = result.container_type or result.raw_container_type or ""
+    d["valid"] = str(result.valid) if result.valid is not None else ""
+    d["reason"] = result.reason or ""
     
     if result.error:
         d["container_number"] = f"error: {result.error}"
-        return d
     
-    d["container_number"] = result.container_number or ""
-    d["container_type"] = result.container_type or ""
-    d["container_color"] = str(result.container_color) if result.container_color else ""
-    d["owner_code"] = result.owner_code or ""
-    d["serial_number"] = result.serial_number or ""
-    d["container_id"] = result.container_id or ""
-    d["container_type_code"] = result.container_type_code or ""
-    d["status"] = result.status or ""
-    d["valid"] = str(result.valid) if result.valid is not None else ""
-    d["reason"] = result.reason or ""
-    d["bounding_box"] = str(result.bounding_box) if result.bounding_box else ""
-    d["method_used"] = result.method_used or ""
-
+    d["container_color"] = str(result.container_color) if result.container_color and result.container_color != [0, 0, 0] else ""
+    d["bounding_box"] = str(result.bounding_box) if result.bounding_box and result.bounding_box != [0, 0, 0, 0] else ""
+    
     if result.weights:
         d["tare_weight_kg"] = str(result.weights.tare_weight.kilograms) if result.weights.tare_weight.kilograms else ""
         d["tare_weight_lbs"] = str(result.weights.tare_weight.pounds) if result.weights.tare_weight.pounds else ""

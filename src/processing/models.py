@@ -55,31 +55,15 @@ class ContainerResult:
     bounding_box: list = field(default_factory=lambda: [0, 0, 0, 0])
     container_color: list = field(default_factory=lambda: [0, 0, 0])
     error: Optional[str] = None
-    status: Optional[str] = None
     weights: Optional[Weights] = None
-    owner_code: Optional[str] = None
-    container_id: Optional[str] = None
-    serial_number: Optional[str] = None
     owner_operator: Optional[OwnerOperator] = None
-    container_type_code: Optional[str] = None
-    method_used: Optional[str] = None
     valid: Optional[bool] = None
     reason: Optional[str] = None
-
-    def _derive_fields(self) -> None:
-        """Populate structured fields from container_number and container_type (idempotent)."""
-        if self.owner_code is not None:
-            return
-        if not self.container_number or len(self.container_number) != 11:
-            return
-        self.owner_code = self.container_number[:4]
-        self.serial_number = self.container_number[4:]
-        self.container_id = f"{self.owner_code} {self.serial_number[:6]} {self.serial_number[6]}"
-        if self.container_type:
-            self.container_type_code = self.container_type
+    source: Optional[str] = None
+    raw_container_number: Optional[str] = None
+    raw_container_type: Optional[str] = None
 
     def to_dict(self) -> dict:
-        self._derive_fields()
         d: dict = {}
         if self.file_name:
             d["file_name"] = self.file_name
@@ -94,30 +78,24 @@ class ContainerResult:
             d["bounding_box"] = self.bounding_box
         if self.container_color and self.container_color != [0, 0, 0]:
             d["container_color"] = self.container_color
-        if self.status is not None:
-            d["status"] = self.status
         if self.weights is not None:
             w = self.weights.to_dict()
             if w is not None:
                 d["weights"] = w
-        if self.owner_code is not None:
-            d["owner_code"] = self.owner_code
-        if self.container_id is not None:
-            d["container_id"] = self.container_id
-        if self.serial_number is not None:
-            d["serial_number"] = self.serial_number
         if self.owner_operator is not None:
             oo = self.owner_operator.to_dict()
             if oo is not None:
                 d["owner_operator"] = oo
-        if self.container_type_code is not None:
-            d["container_type_code"] = self.container_type_code
-        if self.method_used:
-            d["method_used"] = self.method_used
         if self.valid is not None:
             d["valid"] = self.valid
         if self.reason is not None:
             d["reason"] = self.reason
+        if self.raw_container_number is not None:
+            d["raw_container_number"] = self.raw_container_number
+        if self.raw_container_type is not None:
+            d["raw_container_type"] = self.raw_container_type
+        if self.source is not None:
+            d["source"] = self.source
         return d
 
 

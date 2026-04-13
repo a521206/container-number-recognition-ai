@@ -1,7 +1,7 @@
 """Post-processing utilities for extraction results."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -59,7 +59,6 @@ def extract_dominant_color_from_image_bytes(
 def post_process_result(
     result: ContainerResult,
     image_bytes: bytes,
-    bounding_box: Optional[Tuple[int, int, int, int]] = None,
 ) -> ContainerResult:
     """Post-process extraction result to ensure consistent output.
 
@@ -70,9 +69,7 @@ def post_process_result(
 
     if result.container_color == [0, 0, 0] or not result.container_color:
         crop_zone: Optional[list] = None
-        if bounding_box and bounding_box != (0, 0, 0, 0):
-            crop_zone = list(bounding_box)
-        elif result.bounding_box and result.bounding_box != [0, 0, 0, 0]:
+        if result.bounding_box and result.bounding_box != [0, 0, 0, 0]:
             crop_zone = result.bounding_box
         try:
             color = extract_dominant_color_from_image_bytes(image_bytes, crop_zone)

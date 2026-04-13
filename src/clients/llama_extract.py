@@ -15,6 +15,19 @@ log = logging.getLogger(__name__)
 _EXTRACT_POLL_TIMEOUT = 120
 
 
+def _normalize_status(raw) -> str:
+    """Return a plain uppercase status string regardless of whether the SDK
+    gives a plain string (``"COMPLETED"``), a Python enum with a ``.name``
+    attribute, or a dotted string (``"ExtractionStatus.COMPLETED"``).
+    """
+    if hasattr(raw, "name"):
+        return raw.name.upper()
+    if hasattr(raw, "value"):
+        return str(raw.value).upper()
+    s = str(raw).upper()
+    return s.split(".")[-1] if "." in s else s
+
+
 class LlamaExtractClient:
     """Client for Llama Extract API using the official llama-cloud SDK."""
 
@@ -63,19 +76,22 @@ class LlamaExtractClient:
             )
             log.debug("Extraction job created: %s (status=%s)", job.id, job.status)
 
-            if job.status.upper() != "COMPLETED":
-                log.error("Llama Extract job %s failed: %s", job.id, job.error_message)
-                return ContainerResult(error=job.error_message or f"Job finished with status: {job.status}")
+            status = _normalize_status(job.status)
+            if status != "COMPLETED":
+                error_message = getattr(job, "error_message", None)
+                log.error("Llama Extract job %s failed: %s", job.id, error_message)
+                return ContainerResult(error=error_message or f"Job finished with status: {status}")
 
             log.info("Llama Extract job %s completed successfully", job.id)
             return self._parse_extract_result(job.extract_result)
 
-        except TimeoutError as e:
-            log.error("Llama Extract timeout: %s", e)
-            return ContainerResult(error=str(e))
         except Exception as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                log.error("Llama Extract timeout: %s", e)
+                return ContainerResult(error=f"LlamaExtractTimeout: {error_msg}")
             log.exception("Llama Extract error for bytes (filename=%s)", filename)
-            return ContainerResult(error=f"LlamaExtractError: {e}")
+            return ContainerResult(error=f"LlamaExtractError: {error_msg}")
         finally:
             if file_obj:
                 try:

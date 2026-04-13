@@ -5,6 +5,9 @@ import time
 import types
 from io import BytesIO
 
+import cv2
+import numpy as np
+
 from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from msrest.authentication import CognitiveServicesCredentials
 
@@ -66,9 +69,6 @@ class OCRClient:
 
     def extract_from_bytes(self, data: bytes, filename: str = "image.jpg") -> ContainerResult:
         """Extract container data from image bytes using OCR."""
-        import cv2
-        import numpy as np
-        
         try:
             img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
             if img is None:
