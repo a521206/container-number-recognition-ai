@@ -10,6 +10,39 @@ _ISO6346_LETTER_VALUES = {
 }
 
 
+def validate_iso6346_format(container_number: str) -> bool:
+    """
+    Validate the ISO 6346 format for a container number (first 10 characters).
+    Must be 4 letters followed by 6 digits, using valid letter values.
+    """
+    if len(container_number) != 10:
+        return False
+
+    # First 4 characters must be letters
+    for ch in container_number[:4]:
+        if not ch.isalpha() or _ISO6346_LETTER_VALUES.get(ch.upper(), -1) < 0:
+            return False
+
+    # Next 6 characters must be digits
+    for ch in container_number[4:10]:
+        if not ch.isdigit():
+            return False
+
+    return True
+
+
+def validate_iso6346(container_number: str) -> bool:
+    """
+    Validate container number as per ISO 6346 standard.
+    Accepts both 10-character (without check digit) and 11-character (with check digit) formats.
+    """
+    if len(container_number) == 11:
+        return validate_iso6346_check_digit(container_number)
+    elif len(container_number) == 10:
+        return validate_iso6346_format(container_number)
+    return False
+
+
 def validate_iso6346_check_digit(container_number: str) -> bool:
     """
     Validate the ISO 6346 check digit for a container number.

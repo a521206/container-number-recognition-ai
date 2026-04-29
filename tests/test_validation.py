@@ -1,7 +1,7 @@
 """Tests for container number recognition."""
 
 import pytest
-from src.utils.validation import validate_iso6346_check_digit, validate_weight_consistency
+from src.utils.validation import validate_iso6346_check_digit, validate_iso6346_format, validate_iso6346, validate_weight_consistency
 
 
 class TestValidation:
@@ -16,8 +16,28 @@ class TestValidation:
         assert validate_iso6346_check_digit("CSQU3054384") is False
 
     def test_wrong_length(self):
-        """Test wrong length."""
+        """Test wrong length for check digit validation."""
         assert validate_iso6346_check_digit("CSQU305438") is False
+
+    def test_valid_format_10_chars(self):
+        """Test valid 10-character container number format."""
+        assert validate_iso6346_format("CSQU305438") is True
+
+    def test_invalid_format_10_chars(self):
+        """Test invalid 10-character container number format."""
+        assert validate_iso6346_format("CSQ1305438") is False  # invalid letter
+        assert validate_iso6346_format("CSQU30543A") is False  # letter in digits
+        assert validate_iso6346_format("CSQU30543") is False   # too short
+
+    def test_validate_iso6346_11_chars(self):
+        """Test validate_iso6346 with 11 characters."""
+        assert validate_iso6346("CSQU3054383") is True
+        assert validate_iso6346("CSQU3054384") is False
+
+    def test_validate_iso6346_10_chars(self):
+        """Test validate_iso6346 with 10 characters."""
+        assert validate_iso6346("CSQU305438") is True
+        assert validate_iso6346("CSQ1305438") is False
 
 
 class TestWeightValidation:

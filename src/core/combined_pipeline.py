@@ -9,7 +9,7 @@ from ..clients import OCRClient, LlamaExtractClient
 from ..clients.base import ExtractionClient
 from ..processing.extraction import ContainerResult
 from ..processing.post_process import post_process_result
-from ..utils.validation import validate_iso6346_check_digit
+from ..utils.validation import validate_iso6346
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,11 @@ def _finish(result: ContainerResult, method: str, image_bytes: bytes) -> Tuple[C
     """Post-process *result* and set valid flag if not already decided."""
     result = post_process_result(result, image_bytes)
     if result.container_number and result.valid is None:
-        result.valid = validate_iso6346_check_digit(result.container_number)
+        result.valid = validate_iso6346(result.container_number)
+        if result.valid and len(result.container_number) == 10:
+            result.reason = "Check digit not visible but container number is valid"
+        elif not result.valid:
+            result.reason = "Invalid container number format"
     return result, method
 
 
@@ -146,7 +150,7 @@ def combine_results(
 
         if ocr_num == llama_num:
             log.info("Both methods returned matching container number: %s", ocr_num)
-            if validate_iso6346_check_digit(ocr_num):
+            if validate_iso6346(ocr_num):
                 return _finish(_merge_results(ocr_result, llama_result), "combined", image_bytes)
             log.warning("Matched container number %s failed validation", ocr_num)
             result = _merge_results(ocr_result, llama_result)
@@ -154,14 +158,14 @@ def combine_results(
             return _finish(result, "combined", image_bytes)
 
         log.warning("Container number mismatch – OCR: %s, Llama: %s", ocr_num, llama_num)
-        ocr_valid = validate_iso6346_check_digit(ocr_num)
-        llama_valid = validate_iso6346_check_digit(llama_num)
+        ocr_valid = validate_iso6346(ocr_num)
+        llama_valid = validate_iso6346(llama_num)
 
         if ocr_valid and not llama_valid:
-            log.info("Using OCR result (valid check digit)")
+            log.info("Using OCR result (valid container number)")
             return _finish(ocr_result, "ocr", image_bytes)
         if llama_valid and not ocr_valid:
-            log.info("Using Llama result (valid check digit)")
+            log.info("Using Llama result (valid container number)")
             return _finish(_merge_results(llama_result, ocr_result), "llama_extract", image_bytes)
         if ocr_valid and llama_valid:
             log.warning("Both valid but different – using OCR (has bbox)")

@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from ..processing.models import ContainerResult, Weights, WeightValue, OwnerOperator
-from ..utils.validation import validate_iso6346_check_digit
+from ..utils.validation import validate_iso6346
 
 log = logging.getLogger(__name__)
 
@@ -99,12 +99,14 @@ def parse_extracted_data(data: Dict[str, Any]) -> ContainerResult:
     if owner_op and isinstance(owner_op, dict):
         result.owner_operator = _parse_owner_operator(owner_op)
 
-    if result.container_number and len(result.container_number) == 11:
-        if not validate_iso6346_check_digit(result.container_number):
-            log.warning("Container number %s failed ISO 6346 check digit validation", result.container_number)
-            result.valid = False
-            result.reason = "Invalid check digit"
+    if result.container_number:
+        result.valid = validate_iso6346(result.container_number)
+        if not result.valid:
+            log.warning("Container number %s failed ISO 6346 validation", result.container_number)
+            result.reason = "Invalid container number format"
             result.raw_container_number = result.container_number
+        elif len(result.container_number) == 10:
+            result.reason = "Check digit not visible but container number is valid"
 
     log.debug(
         "Parsed result: number=%s, type=%s",

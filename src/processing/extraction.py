@@ -12,7 +12,7 @@ from ..utils.geometry import (
     parse_word_bounding_box, is_bounding_box_horizontal,
     get_bounding_box_half_min_extent, are_coordinates_within_distance,
 )
-from ..utils.validation import validate_iso6346_check_digit
+from ..utils.validation import validate_iso6346
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
     if not result.container_number:
         for m in prefix_pattern.finditer(line_text):
             candidate = m.group(0)
-            if not validate_iso6346_check_digit(candidate):
+            if not validate_iso6346(candidate):
                 continue
             result.container_number = candidate
             match_start, match_end = m.start(), m.end()
@@ -147,7 +147,7 @@ def _extract_container_from_words(words, result: ContainerResult, type_regex: st
                     break
             if len(serial_digits) >= 7:
                 candidate = matched_prefix + serial_digits[:7]
-                if validate_iso6346_check_digit(candidate):
+                if validate_iso6346(candidate):
                     result.container_number = candidate
                     result.bounding_box = bb
                     break
