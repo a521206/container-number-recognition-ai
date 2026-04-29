@@ -10,7 +10,7 @@ DOWNSCALE_THRESHOLD = 4000
 CROP_PADDING = 100
 SPATIAL_BUFFER = 50
 
-DATA_DIR = "./data"
+DATA_DIR = os.getenv("DATA_DIR", "./data")
 PREFIX_FILE = "./container_prefix.txt"
 
 VISION_ENDPOINT = os.getenv("VISION_ENDPOINT", "")

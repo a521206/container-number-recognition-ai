@@ -8,7 +8,10 @@ from typing import Dict
 from .config import DATA_DIR
 from ..processing.extraction import ContainerResult
 
-RESULTS_CSV = os.path.join(DATA_DIR, "results.csv")
+def get_results_csv_path():
+    """Get the current results CSV path based on config.DATA_DIR."""
+    return os.path.join(DATA_DIR, "results.csv")
+
 
 RESULT_COLUMNS = [
     "file_name",
@@ -33,10 +36,11 @@ RESULT_COLUMNS = [
 def get_or_create_results_csv() -> Dict[str, Dict[str, str]]:
     """Load existing results.csv or create empty dict if not exists."""
     results = {}
-    if not os.path.exists(RESULTS_CSV):
+    results_csv = get_results_csv_path()
+    if not os.path.exists(results_csv):
         return results
 
-    with open(RESULTS_CSV, "r", newline="", encoding="utf-8") as f:
+    with open(results_csv, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             file_name = row.get("file_name")
@@ -48,7 +52,7 @@ def get_or_create_results_csv() -> Dict[str, Dict[str, str]]:
 
 def save_results_csv(results: Dict[str, Dict[str, str]]) -> None:
     """Save results dict to CSV with proper columns."""
-    with open(RESULTS_CSV, "w", newline="", encoding="utf-8") as f:
+    with open(get_results_csv_path(), "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=RESULT_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         for file_name, row in sorted(results.items()):
