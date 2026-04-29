@@ -6,6 +6,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 from ..utils.config import CROP_PADDING
+from ..utils.validation import validate_weight_consistency
 
 from .extraction import ContainerResult
 
@@ -79,5 +80,17 @@ def post_process_result(
             log.debug("Extracted color: %s", color)
         except ValueError as e:
             log.warning("Could not extract container color: %s", e)
+
+    # Validate weight consistency if all weight values are present
+    if result.weights is not None:
+        tare = result.weights.tare_weight
+        payload = result.weights.payload_weight
+        max_gross = result.weights.maximum_gross_weight
+        # Check that all values are present (not None)
+        if None not in (tare.kilograms, tare.pounds, payload.kilograms, payload.pounds, max_gross.kilograms, max_gross.pounds):
+            is_valid, detailed_reason = validate_weight_consistency(tare.kilograms, tare.pounds, payload.kilograms, payload.pounds, max_gross.kilograms, max_gross.pounds)
+            if not is_valid:
+                result.valid = False
+                result.reason = detailed_reason
 
     return result
